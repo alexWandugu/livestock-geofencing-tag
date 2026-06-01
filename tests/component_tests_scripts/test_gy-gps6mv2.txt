@@ -1,0 +1,96 @@
+#include <Arduino.h>
+#include <TinyGPSPlus.h>
+
+#define RXD2 16
+#define TXD2 17
+
+TinyGPSPlus gps;
+HardwareSerial gpsSerial(2);
+
+void setup() {
+  Serial.begin(115200);
+  gpsSerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  
+  Serial.println("=== NEO-6M GPS Test Starting ===");
+  Serial.println("Powering from VIN (5V) - Should work");
+  Serial.println("Take the board OUTDOORS now!");
+}
+
+void loop() {
+  while (gpsSerial.available() > 0) {
+    char c = gpsSerial.read();
+    gps.encode(c);
+    // Serial.write(c);        // Uncomment only if you want raw data
+  }
+
+  static unsigned long lastUpdate = 0;
+  if (millis() - lastUpdate > 2000) {   // Print every 2 seconds
+    lastUpdate = millis();
+
+    Serial.printf("Satellites in view: %d | ", gps.satellites.value());
+    
+    if (gps.location.isValid()) {
+      Serial.printf("✅ FIX! Lat: %.6f Lon: %.6f | Alt: %.1fm\n",
+                    gps.location.lat(), gps.location.lng(), gps.altitude.meters());
+    } else {
+      Serial.println("⏳ No Fix Yet - Keep antenna pointing to sky");
+    }
+  }
+}
+
+// #Comment this part out it's for final code
+// // =====================================================
+// // TASK: GPS TASK (Improved for Final Code)
+// // =====================================================
+// void taskGPS(void * parameter)
+// {
+//   Serial.println("GPS Task Started - Waiting for satellite fix...");
+
+//   unsigned long lastPrintTime = 0;
+
+//   while (1)
+//   {
+//     // Read all available data from GPS
+//     while (gpsSerial.available() > 0)
+//     {
+//       char c = gpsSerial.read();
+//       gps.encode(c);
+      
+//       // Optional: Uncomment to debug raw NMEA (remove after testing)
+//       // Serial.write(c);
+//     }
+
+//     // Update location only when we have a valid fix
+//     if (gps.location.isValid() && gps.location.lat() != 0 && gps.location.lng() != 0)
+//     {
+//       latitude = gps.location.lat();
+//       longitude = gps.location.lng();
+      
+//       // Print fix info every 10 seconds (not too spammy)
+//       if (millis() - lastPrintTime > 10000)
+//       {
+//         Serial.printf("✅ GPS Fix! Lat: %.6f | Lon: %.6f | Sat: %d | HDOP: %.1f\n",
+//                       latitude, longitude, 
+//                       gps.satellites.value(), 
+//                       gps.hdop.hdop());
+//         lastPrintTime = millis();
+//       }
+//     }
+//     else
+//     {
+//       // No fix yet - use last known or default (Kenya area)
+//       if (latitude == 0) {
+//         latitude = -1.0970;   // Default near Juja / Thika area
+//         longitude = 37.0153;
+//       }
+      
+//       if (millis() - lastPrintTime > 5000)
+//       {
+//         Serial.printf("⏳ GPS Searching... Satellites in view: %d\n", gps.satellites.value());
+//         lastPrintTime = millis();
+//       }
+//     }
+
+//     vTaskDelay(100 / portTICK_PERIOD_MS);   // 10Hz update rate (balanced)
+//   }
+// }
