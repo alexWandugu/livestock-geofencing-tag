@@ -21,55 +21,60 @@ const char* serverName = "";
 #define BUZZER    26
 
 // ===== THRESHOLDS =====
-float TEMP_MAX = 38.5;           // Cattle body temp alert
+float TEMP_MAX = 38.5;
 float BPM_MIN  = 50;
 float BPM_MAX  = 120;
 float SPO2_MIN = 40;
 
 // ===== GPS GEOFENCE =====
-float centerLat = -1.059921;     // Update to your actual farm center
-float centerLon = 37.145005;
-float geoRadiusMeters = 5.0;    // Adjust as needed
+float centerLat = -1.095;         // Farm / Receiver Coordinates      
+float centerLon = 37.012;
+float geoRadiusMeters = 5000.0;
 
+// ===== AVERAGING FOR BPM & SPO2 =====
+const int NUM_READINGS = 10;          // Average over last 10 readings (~20 seconds)
+float bpmReadings[NUM_READINGS];
+float spo2Readings[NUM_READINGS];
+int readIndex = 0;
+float bpmSum = 0.0;
+float spo2Sum = 0.0;
+bool bufferFilled = false;
+
+// ===== TIMERS =====
 unsigned long lastReceiveTime = 0;
 const unsigned long timeout = 5000;
+
+unsigned long lastMotionTime = 0;
+const unsigned long motionTimeout = 15000;
 
 // ===== VARIABLES =====
 float temperature = 0.0;
 float ax = 0.0, ay = 0.0, az = 0.0;
-float bpm = 0.0, spo2 = 0.0;
+float bpm = 0.0, spo2 = 0.0;           // Raw values
+float avgBPM = 0.0, avgSpO2 = 0.0;     // Averaged values
 float lat = 0.0, lon = 0.0;
-
-unsigned long lastMotionTime = 0;
-const unsigned long motionTimeout = 15000;  // No motion alert after 15s
 
 // ===== HELPER FUNCTIONS =====
 float getValue(String data, String key) {
   int start = data.indexOf(key);
   if (start == -1) return 0.0;
-
   int from = start + key.length();
   int to = data.indexOf(",", from);
   if (to == -1) to = data.length();
-
   return data.substring(from, to).toFloat();
 }
 
-// Haversine distance in meters
 float distanceMeters(float lat1, float lon1, float lat2, float lon2) {
-  float R = 6371000; // Earth radius in meters
+  float R = 6371000;
   float dLat = (lat2 - lat1) * PI / 180;
   float dLon = (lon2 - lon1) * PI / 180;
-
   float a = sin(dLat / 2) * sin(dLat / 2) +
             cos(lat1 * PI / 180) * cos(lat2 * PI / 180) *
             sin(dLon / 2) * sin(dLon / 2);
-
   float c = 2 * atan2(sqrt(a), sqrt(1 - a));
   return R * c;
 }
 
-// Buzzer pattern
 void alertBeep(int times, int dly) {
   for (int i = 0; i < times; i++) {
     digitalWrite(BUZZER, HIGH);
@@ -79,7 +84,34 @@ void alertBeep(int times, int dly) {
   }
 }
 
-// Send data to web dashboard
+void updateAverages(float newBPM, float newSpO2) {
+  // Subtract the oldest reading
+  bpmSum -= bpmReadings[readIndex];
+  spo2Sum -= spo2Readings[readIndex];
+
+  // Store new readings
+  bpmReadings[readIndex] = newBPM;
+  spo2Readings[readIndex] = newSpO2;
+
+  // Add the new readings
+  bpmSum += newBPM;
+  spo2Sum += newSpO2;
+
+  readIndex = (readIndex + 1) % NUM_READINGS;
+
+  if (readIndex == 0) bufferFilled = true;
+
+  // Calculate averages
+  if (bufferFilled) {
+    avgBPM = bpmSum / NUM_READINGS;
+    avgSpO2 = spo2Sum / NUM_READINGS;
+  } else {
+    // Use partial average until buffer is full
+    avgBPM = bpmSum / (readIndex + 1);
+    avgSpO2 = spo2Sum / (readIndex + 1);
+  }
+}
+
 void sendToServer() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -93,22 +125,20 @@ void sendToServer() {
                       "&bpm=" + String(bpm, 2) +
                       "&spo2=" + String(spo2, 2) +
                       "&lat=" + String(lat, 6) +
-                      "&lon=" + String(lon, 6)+
-                      "&centerlat" + String(centerLat, 6)+
-                      "&centerlon" + String(centerLon, 6)+
+                      "&lon=" + String(lon, 6) +
+                      "&centerlat=" + String(centerLat, 6) +
+                      "&centerlon=" + String(centerLon, 6) +
                       "&timestamp=" + String(millis());
 
     int httpResponseCode = http.POST(postData);
     Serial.print("HTTP Response: ");
     Serial.println(httpResponseCode);
-
     http.end();
   } else {
     Serial.println("WiFi not connected");
   }
 }
 
-// ================= ALERT LOGIC =================
 void checkAlerts() {
   bool alert = false;
 
@@ -119,23 +149,23 @@ void checkAlerts() {
     alert = true;
   }
 
-  // BPM ALERT
-  if (bpm < BPM_MIN || bpm > BPM_MAX) {
-    Serial.println("BPM ALERT");
+  // BPM ALERT - using AVERAGE
+  if (avgBPM < BPM_MIN || avgBPM > BPM_MAX) {
+    Serial.println("BPM ALERT (Avg: " + String(avgBPM, 1) + ")");
     alertBeep(2, 150);
     alert = true;
   }
 
-  // SPO2 ALERT
-  if (spo2 < SPO2_MIN) {
-    Serial.println("SPO2 ALERT");
+  // SPO2 ALERT - using AVERAGE
+  if (avgSpO2 < SPO2_MIN) {
+    Serial.println("SPO2 ALERT (Avg: " + String(avgSpO2, 1) + ")");
     alertBeep(3, 100);
     alert = true;
   }
 
   // Motion / Inactivity detection
   float motionMag = sqrt(ax * ax + ay * ay + az * az);
-  if (motionMag < 0.3) {                    // Adjust threshold for stillness
+  if (motionMag < 0.3) {
     if (millis() - lastMotionTime > motionTimeout) {
       Serial.println("NO MOTION / POSSIBLE ILLNESS ALERT");
       alertBeep(4, 150);
@@ -164,6 +194,12 @@ void setup() {
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   pinMode(BUZZER, OUTPUT);
+
+  // Initialize averaging arrays
+  for (int i = 0; i < NUM_READINGS; i++) {
+    bpmReadings[i] = 0;
+    spo2Readings[i] = 0;
+  }
 
   // Startup beep
   digitalWrite(BUZZER, HIGH);
@@ -207,7 +243,7 @@ void loop() {
 
     Serial.println("Raw: " + received);
 
-    // Parse values
+    // Parse raw values
     temperature = getValue(received, "T:");
     ax = getValue(received, "AX:");
     ay = getValue(received, "AY:");
@@ -217,7 +253,10 @@ void loop() {
     lat = getValue(received, "LAT:");
     lon = getValue(received, "LON:");
 
-    // Send to dashboard
+    // Update moving averages
+    updateAverages(bpm, spo2);
+
+    // Send averaged values to dashboard
     sendToServer();
 
     lastReceiveTime = millis();
@@ -226,7 +265,7 @@ void loop() {
     digitalWrite(RED_LED, LOW);
     digitalWrite(BUZZER, LOW);
 
-    // Check alerts
+    // Check alerts using averages
     checkAlerts();
   }
 
