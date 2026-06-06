@@ -1,6 +1,6 @@
 {
     "version": 2,
-    "buildCommand": "node -e \"const fs = require('fs'); let html = fs.readFileSync('index.html', 'utf8'); html = html.replace(/__FIREBASE_API_KEY__/g, process.env.FIREBASE_API_KEY || ''); html = html.replace(/__FIREBASE_AUTH_DOMAIN__/g, process.env.FIREBASE_AUTH_DOMAIN || ''); html = html.replace(/__FIREBASE_DATABASE_URL__/g, process.env.FIREBASE_DATABASE_URL || ''); html = html.replace(/__FIREBASE_PROJECT_ID__/g, process.env.FIREBASE_PROJECT_ID || ''); fs.writeFileSync('index.html', html); console.log('✅ Firebase config injected');\"",
+    "buildCommand": "node -e \"const fs = require('fs'); let html = fs.readFileSync('index.html', 'utf8'); html = html.replace(/%%FIREBASE_API_KEY%%/g, process.env.FIREBASE_API_KEY || ''); html = html.replace(/%%FIREBASE_AUTH_DOMAIN%%/g, process.env.FIREBASE_AUTH_DOMAIN || ''); html = html.replace(/%%FIREBASE_DATABASE_URL%%/g, process.env.FIREBASE_DATABASE_URL || ''); html = html.replace(/%%FIREBASE_PROJECT_ID%%/g, process.env.FIREBASE_PROJECT_ID || ''); fs.writeFileSync('index.html', html); console.log('✅ Firebase config injected');\"",
     "outputDirectory": ".",
     "cleanUrls": true
 }
