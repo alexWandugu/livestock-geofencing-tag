@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Livestock Tag - Real-Time Dashboard</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: #f0f2f5;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin: 10px 0 15px 0;
+        }
+
+        #map {
+            height: 480px;
+            /* Slightly reduced to give more space to data */
+            width: 100%;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .info {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .alert {
+            background: #fff0f0;
+            border-left: 6px solid #e74c3c;
+        }
+
+        .breach-alert {
+            background: #e74c3c;
+            color: white;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .reading-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 14px;
+        }
+
+        .reading-item {
+            background: #f8f9fa;
+            padding: 14px;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .icon {
+            font-size: 1.6rem;
+            width: 40px;
+            text-align: center;
+        }
+
+        .label {
+            font-size: 0.85rem;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .value {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🐄 Livestock Real-Time Monitor</h1>
+    <div id="map"></div>
+
+    <div class="info" id="latest-info">
+        <strong>Loading latest reading...Ensure the animal tag receiver/base station is online</strong>
+    </div>
+
+    <script>
+        // ================== CONFIG ==================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDJ1zkPO_0dVMnXnWtuyWOYUzyFSC4KXgU",
+            authDomain: "kiriga-dashboard-default-rtdb.firebaseapp.com",
+            databaseURL: "https://kiriga-dashboard-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "kiriga-dashboard",
+        };
+
+        let centerLat = -1.286389;
+        let centerLon = 36.817223;
+        let geoRadiusMeters = 5000;
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const readingsRef = db.ref('livestock_readings');
+
+        let map, animalMarker, farmMarker, geofenceCircle;
+        let greenIcon, redIcon;
+
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function initMap() {
+            map = L.map('map').setView([centerLat, centerLon], 15);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+
+            greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+            redIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+
+            farmMarker = L.marker([centerLat, centerLon], {
+                icon: L.divIcon({ html: '<div style="background: blue; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">F</div>', iconSize: [24, 24] })
+            }).addTo(map).bindPopup("<b>Farm Center / Geofence</b>");
+
+            animalMarker = L.marker([centerLat, centerLon], { icon: greenIcon }).addTo(map).bindPopup("<b>Animal Location</b>");
+
+            geofenceCircle = L.circle([centerLat, centerLon], { color: 'blue', fillColor: '#3388ff', fillOpacity: 0.15, radius: geoRadiusMeters }).addTo(map);
+
+            // Fit to View Button
+            const fitControl = L.control({ position: 'topleft' });
+            fitControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+                div.style.backgroundColor = 'white'; div.style.width = '34px'; div.style.height = '34px';
+                div.innerHTML = '<a href="#" title="Fit to View" style="display:block; width:34px; height:34px; text-align:center; line-height:34px; font-size:20px;">🔎</a>';
+                div.onclick = function (e) { e.preventDefault(); updateView(); };
+                return div;
+            };
+            fitControl.addTo(map);
+
+            updateView();
+        }
+
+        function updateView() {
+            if (!map || !farmMarker || !animalMarker) return;
+            const bounds = L.latLngBounds([farmMarker.getLatLng(), animalMarker.getLatLng()]);
+            map.fitBounds(bounds, { padding: [60, 60] });
+        }
+
+        const script = document.createElement('script');
+        script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+        script.onload = initMap;
+        document.head.appendChild(script);
+
+        readingsRef.limitToLast(1).on('value', (snapshot) => {
+            snapshot.forEach(child => {
+                const data = child.val();
+                let animalLat = centerLat, animalLon = centerLon;
+
+                if (data.lat && data.lon) {
+                    animalLat = parseFloat(data.lat);
+                    animalLon = parseFloat(data.lon);
+                    animalMarker.setLatLng([animalLat, animalLon]);
+                }
+
+                if (data.clat && data.clon) {
+                    centerLat = parseFloat(data.clat);
+                    centerLon = parseFloat(data.clon);
+                    farmMarker.setLatLng([centerLat, centerLon]);
+                    geofenceCircle.setLatLng([centerLat, centerLon]);
+                }
+
+                if (data.radius) {
+                    geoRadiusMeters = parseFloat(data.radius);
+                    geofenceCircle.setRadius(geoRadiusMeters);
+                }
+
+                const distance = haversineDistance(centerLat, centerLon, animalLat, animalLon);
+                const isOutside = distance > geoRadiusMeters;
+
+                animalMarker.setIcon(isOutside ? redIcon : greenIcon);
+
+                const infoDiv = document.getElementById('latest-info');
+                let breachHTML = isOutside ? `<div class="breach-alert"><i class="fas fa-exclamation-triangle"></i> GEOFENCE BREACH DETECTED! Animal is ${distance.toFixed(0)}m outside.</div>` : '';
+
+                infoDiv.innerHTML = `
+                    ${breachHTML}
+                    <h3 style="margin: 8px 0 16px 0; color: #2c3e50;">Latest Reading</h3>
+                    <div class="reading-grid">
+                        <div class="reading-item ${isOutside ? 'breach' : ''}"><div class="icon">🌡️</div><div><div class="label">Temperature</div><div class="value">${data.temperature || 'N/A'} °C</div></div></div>
+                        <div class="reading-item"><div class="icon">❤️</div><div><div class="label">Heart Rate</div><div class="value">${data.bpm || 'N/A'} BPM</div></div></div>
+                        <div class="reading-item"><div class="icon">🫁</div><div><div class="label">SpO2</div><div class="value">${data.spo2 || 'N/A'} %</div></div></div>
+                        <div class="reading-item"><div class="icon">📊</div><div><div class="label">Acceleration</div><div class="value">X:${(data.ax || 0).toFixed(2)} | Y:${(data.ay || 0).toFixed(2)} | Z:${(data.az || 0).toFixed(2)}</div></div></div>
+                        <div class="reading-item"><div class="icon">📍</div><div><div class="label">Animal Location</div><div class="value">${animalLat.toFixed(5)}, ${animalLon.toFixed(5)}</div></div></div>
+                        <div class="reading-item"><div class="icon">🏠</div><div><div class="label">Farm Center</div><div class="value">${centerLat.toFixed(5)}, ${centerLon.toFixed(5)}</div></div></div>
+                        <div class="reading-item ${isOutside ? 'breach' : ''}"><div class="icon">🛡️</div><div><div class="label">Geofence Status</div><div class="value">${geoRadiusMeters} m | ${distance.toFixed(0)} m away</div></div></div>
+                    </div>
+                    <div style="margin-top: 15px; text-align: right; font-size: 0.85rem; color: #777;">Updated: ${new Date().toLocaleTimeString()}</div>
+                `;
+
+                infoDiv.classList.toggle('alert', isOutside);
+                updateView();
+            });
+        });
+    </script>
+</body>
+
+</html>
