@@ -105,10 +105,10 @@
     <script>
         // ================== CONFIG ==================
         const firebaseConfig = {
-            apiKey: "%%FIREBASE_API_KEY%%",
-            authDomain: "%%FIREBASE_AUTH_DOMAIN%%",
-            databaseURL: "%%FIREBASE_DATABASE_URL%%",
-            projectId: "%%FIREBASE_PROJECT_ID%%",
+            apiKey: process.env.FIREBASE_API_KEY || "%%FIREBASE_API_KEY%%",
+            authDomain: process.env.authDomain || "%%FIREBASE_AUTH_DOMAIN%%",
+            databaseURL: process.env.databaseURL || "%%FIREBASE_DATABASE_URL%%",
+            projectId: process.env.projectId || "%%FIREBASE_PROJECT_ID%%",
         };
 
         let centerLat = -1.286389;
