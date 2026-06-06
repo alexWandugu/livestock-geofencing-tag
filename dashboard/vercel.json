@@ -1,0 +1,10 @@
+{
+    "buildCommand": "node replace-env.js",
+    "outputDirectory": ".",
+    "env": {
+        "FIREBASE_API_KEY": "@firebase-api-key",
+        "FIREBASE_AUTH_DOMAIN": "@firebase-auth-domain",
+        "FIREBASE_DATABASE_URL": "@firebase-database-url",
+        "FIREBASE_PROJECT_ID": "@firebase-project-id"
+    }
+}
