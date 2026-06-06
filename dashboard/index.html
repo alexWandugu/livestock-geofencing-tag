@@ -23,7 +23,7 @@
         h1 {
             text-align: center;
             color: #2c3e50;
-            margin: 10px 0 15px 0;
+            margin: 10px 0 15px;
         }
 
         #map {
@@ -48,6 +48,18 @@
 
         .breach-alert {
             background: #e74c3c;
+            color: white;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .offline-alert {
+            background: #ff9800;
             color: white;
             padding: 14px;
             border-radius: 8px;
@@ -91,6 +103,13 @@
             font-weight: 600;
             color: #2c3e50;
         }
+
+        .timestamp {
+            text-align: right;
+            font-size: 0.85rem;
+            color: #777;
+            margin-top: 10px;
+        }
     </style>
 </head>
 
@@ -99,7 +118,7 @@
     <div id="map"></div>
 
     <div class="info" id="latest-info">
-        <strong>Loading latest reading...Ensure the animal tag receiver/base station is online</strong>
+        <strong>Loading latest reading... Ensure the animal tag receiver is online.</strong>
     </div>
 
     <script>
@@ -110,32 +129,37 @@
             databaseURL: "__FIREBASE_DATABASE_URL__",
             projectId: "__FIREBASE_PROJECT_ID__",
         };
-
-        let centerLat = -1.286389;
-        let centerLon = 36.817223;
-        let geoRadiusMeters = 5000;
-
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         const readingsRef = db.ref('livestock_readings');
 
+        let centerLat = -1.09, centerLon = 37.01, geoRadiusMeters = 1500;
+        let lastTimestamp = 0;
         let map, animalMarker, farmMarker, geofenceCircle;
         let greenIcon, redIcon;
+
+        const OFFLINE_THRESHOLD = 30000; // 30 seconds
 
         function haversineDistance(lat1, lon1, lat2, lon2) {
             const R = 6371000;
             const dLat = (lat2 - lat1) * Math.PI / 180;
             const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
             return R * c;
         }
 
+        function formatTimestamp(ts) {
+            if (!ts) return "Unknown";
+            const date = new Date(ts * 1000); // convert unix seconds to ms
+            return date.toLocaleString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+
         function initMap() {
             map = L.map('map').setView([centerLat, centerLon], 15);
-
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
@@ -143,26 +167,23 @@
             greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
             redIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
-            farmMarker = L.marker([centerLat, centerLon], {
-                icon: L.divIcon({ html: '<div style="background: blue; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold;">F</div>', iconSize: [24, 24] })
-            }).addTo(map).bindPopup("<b>Farm Center / Geofence</b>");
+            farmMarker = L.marker([centerLat, centerLon], { icon: L.divIcon({ html: '<div style="background:blue;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:bold;">F</div>', iconSize: [24, 24] }) })
+                .addTo(map).bindPopup("<b>Farm Center</b>");
 
             animalMarker = L.marker([centerLat, centerLon], { icon: greenIcon }).addTo(map).bindPopup("<b>Animal Location</b>");
 
             geofenceCircle = L.circle([centerLat, centerLon], { color: 'blue', fillColor: '#3388ff', fillOpacity: 0.15, radius: geoRadiusMeters }).addTo(map);
 
-            // Fit to View Button
+            // Fit button
             const fitControl = L.control({ position: 'topleft' });
             fitControl.onAdd = function () {
                 const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
                 div.style.backgroundColor = 'white'; div.style.width = '34px'; div.style.height = '34px';
-                div.innerHTML = '<a href="#" title="Fit to View" style="display:block; width:34px; height:34px; text-align:center; line-height:34px; font-size:20px;">🔎</a>';
-                div.onclick = function (e) { e.preventDefault(); updateView(); };
+                div.innerHTML = '<a href="#" title="Fit to View" style="display:block;width:34px;height:34px;text-align:center;line-height:34px;font-size:20px;">🔎</a>';
+                div.onclick = (e) => { e.preventDefault(); updateView(); };
                 return div;
             };
             fitControl.addTo(map);
-
-            updateView();
         }
 
         function updateView() {
@@ -171,58 +192,63 @@
             map.fitBounds(bounds, { padding: [60, 60] });
         }
 
+        // Load Leaflet JS
         const script = document.createElement('script');
         script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
         script.onload = initMap;
         document.head.appendChild(script);
 
+        // Real-time listener
         readingsRef.limitToLast(1).on('value', (snapshot) => {
             snapshot.forEach(child => {
                 const data = child.val();
-                let animalLat = centerLat, animalLon = centerLon;
+                const now = Date.now();
+                const ts = data.timestamp || 0;
+                lastTimestamp = ts * 1000;
 
-                if (data.lat && data.lon) {
-                    animalLat = parseFloat(data.lat);
-                    animalLon = parseFloat(data.lon);
-                    animalMarker.setLatLng([animalLat, animalLon]);
-                }
+                let animalLat = parseFloat(data.lat) || centerLat;
+                let animalLon = parseFloat(data.lon) || centerLon;
 
-                if (data.clat && data.clon) {
-                    centerLat = parseFloat(data.clat);
-                    centerLon = parseFloat(data.clon);
-                    farmMarker.setLatLng([centerLat, centerLon]);
-                    geofenceCircle.setLatLng([centerLat, centerLon]);
-                }
-
-                if (data.radius) {
-                    geoRadiusMeters = parseFloat(data.radius);
-                    geofenceCircle.setRadius(geoRadiusMeters);
-                }
+                // Update center if sent
+                if (data.clat) centerLat = parseFloat(data.clat);
+                if (data.clon) centerLon = parseFloat(data.clon);
+                if (data.radius) geoRadiusMeters = parseFloat(data.radius);
 
                 const distance = haversineDistance(centerLat, centerLon, animalLat, animalLon);
-                const isOutside = distance > geoRadiusMeters;
+                const isBreach = distance > geoRadiusMeters;
+                const isOffline = (now - lastTimestamp) > OFFLINE_THRESHOLD;
 
-                animalMarker.setIcon(isOutside ? redIcon : greenIcon);
+                // Update markers
+                animalMarker.setLatLng([animalLat, animalLon]);
+                animalMarker.setIcon(isBreach ? redIcon : greenIcon);
+                farmMarker.setLatLng([centerLat, centerLon]);
+                geofenceCircle.setLatLng([centerLat, centerLon]);
+                geofenceCircle.setRadius(geoRadiusMeters);
 
                 const infoDiv = document.getElementById('latest-info');
-                let breachHTML = isOutside ? `<div class="breach-alert"><i class="fas fa-exclamation-triangle"></i> GEOFENCE BREACH DETECTED! Animal is ${distance.toFixed(0)}m outside.</div>` : '';
+                let statusHTML = '';
+
+                if (isOffline) {
+                    statusHTML = `<div class="offline-alert"><i class="fas fa-wifi-slash"></i> RECEIVER OFFLINE - Last update: ${formatTimestamp(ts)}</div>`;
+                } else if (isBreach) {
+                    statusHTML = `<div class="breach-alert"><i class="fas fa-exclamation-triangle"></i> GEOFENCE BREACH! Animal is ${distance.toFixed(0)}m outside.</div>`;
+                }
 
                 infoDiv.innerHTML = `
-                    ${breachHTML}
-                    <h3 style="margin: 8px 0 16px 0; color: #2c3e50;">Latest Reading</h3>
+                    ${statusHTML}
+                    <h3 style="margin:8px 0 16px 0; color:#2c3e50;">Latest Reading</h3>
                     <div class="reading-grid">
-                        <div class="reading-item ${isOutside ? 'breach' : ''}"><div class="icon">🌡️</div><div><div class="label">Temperature</div><div class="value">${data.temperature || 'N/A'} °C</div></div></div>
+                        <div class="reading-item"><div class="icon">🌡️</div><div><div class="label">Temperature</div><div class="value">${data.temperature || 'N/A'} °C</div></div></div>
                         <div class="reading-item"><div class="icon">❤️</div><div><div class="label">Heart Rate</div><div class="value">${data.bpm || 'N/A'} BPM</div></div></div>
                         <div class="reading-item"><div class="icon">🫁</div><div><div class="label">SpO2</div><div class="value">${data.spo2 || 'N/A'} %</div></div></div>
                         <div class="reading-item"><div class="icon">📊</div><div><div class="label">Acceleration</div><div class="value">X:${(data.ax || 0).toFixed(2)} | Y:${(data.ay || 0).toFixed(2)} | Z:${(data.az || 0).toFixed(2)}</div></div></div>
                         <div class="reading-item"><div class="icon">📍</div><div><div class="label">Animal Location</div><div class="value">${animalLat.toFixed(5)}, ${animalLon.toFixed(5)}</div></div></div>
                         <div class="reading-item"><div class="icon">🏠</div><div><div class="label">Farm Center</div><div class="value">${centerLat.toFixed(5)}, ${centerLon.toFixed(5)}</div></div></div>
-                        <div class="reading-item ${isOutside ? 'breach' : ''}"><div class="icon">🛡️</div><div><div class="label">Geofence Status</div><div class="value">${geoRadiusMeters} m | ${distance.toFixed(0)} m away</div></div></div>
+                        <div class="reading-item ${isBreach ? 'alert' : ''}"><div class="icon">🛡️</div><div><div class="label">Geofence Status</div><div class="value">${geoRadiusMeters} m | ${distance.toFixed(0)} m away</div></div></div>
                     </div>
-                    <div style="margin-top: 15px; text-align: right; font-size: 0.85rem; color: #777;">Updated: ${new Date().toLocaleTimeString()}</div>
+                    <div class="timestamp">Updated: ${formatTimestamp(ts)} ${isOffline ? '(stale)' : ''}</div>
                 `;
 
-                infoDiv.classList.toggle('alert', isOutside);
                 updateView();
             });
         });
