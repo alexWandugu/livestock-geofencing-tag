@@ -7,9 +7,6 @@
 const char* ssid = "";
 const char* password = "";
 
-// ===== SERVER URL =====
-const char* serverName = "";
-
 // ===== LoRa Pins =====
 #define SS   5
 #define RST  14
@@ -27,9 +24,9 @@ float BPM_MAX  = 120;
 float SPO2_MIN = 40;
 
 // ===== GPS GEOFENCE =====
-float centerLat = -1.095;         // Farm / Receiver Coordinates      
-float centerLon = 37.012;
-float geoRadiusMeters = 5000.0;
+float centerLat = -1.09;
+float centerLon = 37.01;
+float geoRadiusMeters = 1500.0;
 
 // ===== AVERAGING FOR BPM & SPO2 =====
 const int NUM_READINGS = 10;          // Average over last 10 readings (~20 seconds)
@@ -112,27 +109,45 @@ void updateAverages(float newBPM, float newSpO2) {
   }
 }
 
+// ===== FIREBASE CONFIG =====
+const char* firebaseHost = "https://example-default-rtdb.firebasedatabase.app/";
+const char* firebasePath = "/livestock_readings.json";
+
+// ===== SEND TO FIREBASE =====
 void sendToServer() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    http.begin(serverName);
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-    String postData = "temperature=" + String(temperature, 2) +
-                      "&ax=" + String(ax, 2) +
-                      "&ay=" + String(ay, 2) +
-                      "&az=" + String(az, 2) +
-                      "&bpm=" + String(bpm, 2) +
-                      "&spo2=" + String(spo2, 2) +
-                      "&lat=" + String(lat, 6) +
-                      "&lon=" + String(lon, 6) +
-                      "&centerlat=" + String(centerLat, 6) +
-                      "&centerlon=" + String(centerLon, 6) +
-                      "&timestamp=" + String(millis());
+    String url = String(firebaseHost) + firebasePath;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
 
-    int httpResponseCode = http.POST(postData);
-    Serial.print("HTTP Response: ");
+    // Build JSON payload
+    String jsonData = "{";
+    jsonData += "\"temperature\":" + String(temperature, 2) + ",";
+    jsonData += "\"ax\":" + String(ax, 2) + ",";
+    jsonData += "\"ay\":" + String(ay, 2) + ",";
+    jsonData += "\"az\":" + String(az, 2) + ",";
+    jsonData += "\"bpm\":" + String(bpm, 2) + ",";
+    jsonData += "\"spo2\":" + String(spo2, 2) + ",";
+    jsonData += "\"lat\":" + String(lat, 6) + ",";
+    jsonData += "\"lon\":" + String(lon, 6) + ",";
+    jsonData += "\"clat\":" + String(centerLat, 6) + ",";
+    jsonData += "\"clon\":" + String(centerLon, 6) + ",";
+    jsonData += "\"radius\":" + String(geoRadiusMeters, 2) + ",";
+    jsonData += "\"timestamp\":" + String(millis()) + ""; 
+    jsonData += "}";
+
+    int httpResponseCode = http.POST(jsonData);
+
+    Serial.print("Firebase Response: ");
     Serial.println(httpResponseCode);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Response: " + response);
+    }
+
     http.end();
   } else {
     Serial.println("WiFi not connected");
