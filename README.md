@@ -85,7 +85,7 @@ Data is sent from the Receiver every ~2 seconds and stored for monitoring from a
 
 ## Contributors
 
-- Ochieng Acheng Tabby
+- Jacob Kirigha
 - Alex Thiong'o Wandugu
 
 ---
